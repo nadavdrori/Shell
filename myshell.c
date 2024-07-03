@@ -9,6 +9,16 @@
 #include <unistd.h>
 #include <fcntl.h>
 
+int find_index(char **arglist, int size, char* target);
+int default_exec(char **arglist);
+int background_exec(char **arglist);
+int input_redr_com(char **arglist, int count);
+int output_redr_com(char **arglist, int count);
+int pipe_exe(char **arglist, int pipe_i);
+int prepare(void);
+int finalize(void);
+int process_arglist(int count, char **arglist);
+
 int find_index(char **arglist, int size, char* target)
 {
     for (int i = 0; i < size; i++) {
@@ -29,7 +39,7 @@ int default_exec(char **arglist){
     else if (pid == 0){
         signal(SIGINT,SIG_DFL);
         if (execvp(arglist[0], arglist)==-1){
-            fprintf(stderr, "execution failed");
+            fprintf(stderr, "execution failed - invalid command");
             exit(1);
         }
     }
@@ -54,9 +64,7 @@ int background_exec(char **arglist){
             exit(1);
         }
     }
-    else{
-        return 1;
-    }
+    return 1;
 }
 
 int input_redr_com(char **arglist, int count){
@@ -67,7 +75,7 @@ int input_redr_com(char **arglist, int count){
         return 0;
     }
     else if (pid == 0){
-        int fd = open(arglist[count-1], O_CREAT|O_TRUNC|O_WRONLY);
+        int fd = open(arglist[count-1], O_CREAT|O_APPEND|O_RDONLY, 0644);
         if (fd == -1) {
             fprintf(stderr, "error opening file");
             exit(1);
@@ -97,8 +105,7 @@ int output_redr_com(char **arglist, int count){
         return 0;
     }
     else if (pid == 0){
-        int file_i = arglist[count-1];
-        int fd = open(arglist[file_i], O_CREAT|O_TRUNC|O_WRONLY);
+        int fd = open(arglist[count-1], O_CREAT|O_APPEND|O_WRONLY, 0644);
         if (fd == -1) {
             fprintf(stderr, "error opening file");
             exit(1);
@@ -133,12 +140,12 @@ int pipe_exe(char **arglist, int pipe_i){
         return 0;
     }
     else if(pid1 == 0){
+        signal(SIGINT, SIG_DFL);
         close(pipefd[0]);
         if (dup2(pipefd[1], 1)==-1){
             fprintf(stderr, "dup2 com1 failed");
             exit(1);
         }
-        signal(SIGINT,SIG_DFL);
         close(pipefd[1]);
         if (execvp(arglist[0], arglist)==-1){
             fprintf(stderr, "execution failed com1");
@@ -151,15 +158,15 @@ int pipe_exe(char **arglist, int pipe_i){
             fprintf(stderr, "fork2 failed");
             return 0;
         }
-        else if(pid1 == 0){
+        else if(pid2 == 0){
+            signal(SIGINT,SIG_DFL);
             close(pipefd[1]);
             if (dup2(pipefd[0], 0)==-1){
                 fprintf(stderr, "dup2 com2 failed");
                 exit(1);
             }
-            signal(SIGINT,SIG_DFL);
             close(pipefd[0]);
-            if(execvp(arglist[0], arglist[pipe_i+1]) == -1){
+            if(execvp(arglist[pipe_i+1], arglist+pipe_i+1) == -1){
                 fprintf(stderr, "execution failed com2");
                 exit(1);
             }
@@ -171,6 +178,7 @@ int pipe_exe(char **arglist, int pipe_i){
 
             waitpid(pid1, &status1, 0);
             waitpid(pid2, &status2, 0);
+            
             return 1;
         }
     }
@@ -188,44 +196,43 @@ int finalize(void){
 }
 
 int process_arglist(int count, char **arglist){
-
     int pipe_com = 0, background_com=0, i_redr_com = 0, o_redr_com = 0;
 
-    for (int i=0; i<range(count); i++) {
-        if (arglist[i][0] == "|"){
+    for (int i=0; i<count; i++) {
+        if (strcmp(arglist[i],"|") == 0){
             pipe_com = 1;
         }
-        else if (arglist[i][0]=="<"){
+        else if (strcmp(arglist[i],"<")==0){
             i_redr_com = 1;
         }
         else if (strcmp(arglist[i], ">>")==0){
             o_redr_com = 1;
         }
-        else if (arglist[count][0] == "&") {
+        else if (strcmp(arglist[i],"&") == 0) {
             background_com = 1;
         }
     }
     if (pipe_com == 1){
         int pipe_index = find_index(arglist, count+1, "|");
         arglist[pipe_index] = NULL;
-        if (pipe_exe(arglist, pipe_index) == 0);
+        if (pipe_exe(arglist, pipe_index) == 0)
         {return 0;}
     }
     else if (i_redr_com == 1) {
-        if (input_redr_com(arglist, count)==0);
+        if (input_redr_com(arglist, count)==0)
         {return 0;}
     }
     else if(o_redr_com == 1){
-        if (output_redr_com(arglist, count)==0);
+        if (output_redr_com(arglist, count)==0)
         {return 0;}
     }
     else if (background_com == 1){
         arglist[count-1] = NULL;
-        if (background_exec(arglist)==0);
+        if (background_exec(arglist)==0)
         {return 0;}
     }
     else{ 
-        if (default_exec(arglist)==0);
+        if (default_exec(arglist)==0)
         {return 0;}
     }
     return 1;
